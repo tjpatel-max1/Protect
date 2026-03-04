@@ -2,10 +2,13 @@ import os
 import time
 import random
 import string
+import threading
+
 from flask import Flask
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from motor.motor_asyncio import AsyncIOMotorClient
+
 
 # ---------------- ENV ----------------
 
@@ -17,6 +20,7 @@ MONGO_URI = os.getenv("MONGO_URI")
 
 PORT = int(os.getenv("PORT", 10000))
 
+
 # ---------------- DATABASE ----------------
 
 mongo = AsyncIOMotorClient(MONGO_URI)
@@ -24,6 +28,7 @@ db = mongo["srcprotect"]
 
 channels_db = db.channels
 videos_db = db.videos
+
 
 # ---------------- BOT ----------------
 
@@ -34,11 +39,13 @@ bot = Client(
     bot_token=BOT_TOKEN
 )
 
+
 # ---------------- ANTISPAM ----------------
 
 user_last_request = {}
 
 def allow_request(user_id):
+
     now = time.time()
 
     if user_id in user_last_request:
@@ -57,14 +64,18 @@ def generate_token(length=6):
 
 
 async def unique_token():
+
     while True:
+
         token = generate_token()
+
         exists = await videos_db.find_one({"token": token})
+
         if not exists:
             return token
 
 
-# ---------------- ADMIN ----------------
+# ---------------- ADMIN COMMAND ----------------
 
 @bot.on_message(filters.command("addprotect") & filters.user(ADMIN_ID))
 async def addprotect(client, message):
@@ -113,6 +124,7 @@ async def start(client, message):
     payload = message.command[1]
 
     course_id, token = payload.split("_")
+
     course_id = int(course_id)
 
     course = await channels_db.find_one({"id": course_id})
@@ -156,7 +168,10 @@ async def detect_storage(client, message):
 
     course = await channels_db.find_one({"storage": storage_id})
 
-    if not course or not course["active"]:
+    if not course:
+        return
+
+    if not course["active"]:
         return
 
     token = await unique_token()
@@ -208,15 +223,13 @@ def home():
     return "Bot Running"
 
 
-# ---------------- STARTUP ----------------
-
 def run_flask():
     app.run("0.0.0.0", PORT)
 
 
-import threading
 threading.Thread(target=run_flask).start()
 
-# ---------------- RUN BOT ----------------
+
+# ---------------- START BOT ----------------
 
 bot.run()

@@ -1,4 +1,9 @@
 #2nd bot
+import asyncio
+
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
 import os
 import time
 import random
@@ -9,7 +14,6 @@ from flask import Flask
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
-
 
 # ---------------- ENV ----------------
 

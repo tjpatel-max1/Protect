@@ -1,3 +1,9 @@
+import asyncio
+
+# Fix Python 3.14 event loop issue
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
 import os
 import time
 import random
@@ -8,7 +14,6 @@ from flask import Flask
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from motor.motor_asyncio import AsyncIOMotorClient
-
 
 # ---------------- ENV ----------------
 

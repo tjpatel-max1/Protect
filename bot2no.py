@@ -1,4 +1,4 @@
-#2nd bot
+#2nd bot start but no response 
 import asyncio
 
 loop = asyncio.new_event_loop()

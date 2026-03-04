@@ -10,6 +10,7 @@ import threading
 from flask import Flask
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.errors import FloodWait
 from motor.motor_asyncio import AsyncIOMotorClient
 
 API_ID=int(os.getenv("API_ID"))
@@ -19,7 +20,7 @@ ADMIN_ID=int(os.getenv("ADMIN_ID"))
 MONGO_URI=os.getenv("MONGO_URI")
 PORT=int(os.getenv("PORT",10000))
 
-POST_DELAY=1.4
+POST_DELAY=2
 
 mongo=AsyncIOMotorClient(MONGO_URI)
 db=mongo["srcprotect"]
@@ -138,6 +139,18 @@ async def detect_storage(client,message):
 
     asyncio.create_task(scan_storage(course))
 
+async def safe_send(chat,text,button):
+
+    while True:
+
+        try:
+            await bot.send_message(chat,text,reply_markup=button)
+            return
+
+        except FloodWait as e:
+            print(f"FloodWait {e.value}s")
+            await asyncio.sleep(e.value)
+
 async def scan_storage(course):
 
     storage=course["storage"]
@@ -166,10 +179,10 @@ async def scan_storage(course):
             )]]
         )
 
-        await bot.send_message(
+        await safe_send(
             course["public"],
             msg.caption or "",
-            reply_markup=button
+            button
         )
 
         await asyncio.sleep(POST_DELAY)
@@ -261,7 +274,9 @@ threading.Thread(target=run).start()
 
 async def startup():
     await bot.start()
-    await bot.get_dialogs()
+
+    async for _ in bot.get_dialogs():
+        break
 
 loop.run_until_complete(startup())
 

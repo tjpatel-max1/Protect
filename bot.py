@@ -36,7 +36,7 @@ user_last_request={}
 def allow_request(user):
     now=time.time()
     if user in user_last_request:
-        if now-user_last_request[user]<3:
+        if now-user_last_request[user] < 3:
             return False
     user_last_request[user]=now
     return True
@@ -148,7 +148,9 @@ async def safe_send(chat,text,button):
             return
 
         except FloodWait as e:
+
             print(f"FloodWait {e.value}s")
+
             await asyncio.sleep(e.value)
 
 async def scan_storage(course):
@@ -271,13 +273,5 @@ def run():
     app.run("0.0.0.0",PORT)
 
 threading.Thread(target=run).start()
-
-async def startup():
-    await bot.start()
-
-    async for _ in bot.get_dialogs():
-        break
-
-loop.run_until_complete(startup())
 
 bot.run()

@@ -24,7 +24,7 @@ PORT = int(os.environ.get("PORT", 10000))
 
 bot = Client("protectbot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-mongo = AsyncIOMotorClient(MONGO_URL)
+mongo = AsyncIOMotorClient(MONGO_URI)
 db = mongo.protectbot
 
 channels_db = db.channels

@@ -19,7 +19,7 @@ API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 MONGO_URL = os.environ["MONGO_URI"]
-OWNER_ID = int(os.environ["OWNER_ID"])
+OWNER_ID = int(os.environ["ADMIN_ID"])
 PORT = int(os.environ.get("PORT", 10000))
 
 bot = Client("protectbot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)

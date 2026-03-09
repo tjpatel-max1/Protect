@@ -19,6 +19,7 @@ BOT_TOKEN=os.getenv("BOT_TOKEN")
 ADMIN_ID=int(os.getenv("ADMIN_ID"))
 MONGO_URI=os.getenv("MONGO_URI")
 PORT=int(os.getenv("PORT",10000))
+CONTACT_BOT=os.getenv("CONTACT_BOT"," ")
 
 mongo=AsyncIOMotorClient(MONGO_URI)
 db=mongo["srcprotect"]
@@ -29,7 +30,7 @@ admins_db=db.admins
 
 bot=Client("protectbot",api_id=API_ID,api_hash=API_HASH,bot_token=BOT_TOKEN)
 
-POST_DELAY=2
+POST_DELAY=5
 
 upload_queue=Queue()
 
@@ -266,8 +267,7 @@ async def start(client,message):
     if len(message.command)==1:
 
         await message.reply_text(
-        "This bot is private.\n\nContact @VIP_Official_gang_Bot")
-
+        f"This bot is private.\n\nContact {CONTACT_BOT}")
         return
 
     payload=message.command[1]

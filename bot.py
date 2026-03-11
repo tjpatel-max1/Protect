@@ -30,7 +30,7 @@ admins_db=db.admins
 
 bot=Client("protectbot",api_id=API_ID,api_hash=API_HASH,bot_token=BOT_TOKEN)
 
-POST_DELAY=5
+POST_DELAY=2
 
 upload_queue=Queue()
 

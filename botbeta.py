@@ -8,7 +8,6 @@ import random
 import string
 import threading
 from flask import Flask
-from asyncio import Queue
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -19,7 +18,7 @@ BOT_TOKEN=os.getenv("BOT_TOKEN")
 ADMIN_ID=int(os.getenv("ADMIN_ID"))
 MONGO_URI=os.getenv("MONGO_URI")
 PORT=int(os.getenv("PORT",10000))
-CONTACT_BOT=os.getenv("CONTACT_BOT"," ")
+CONTACT_BOT=os.getenv("CONTACT_BOT","Admin")
 
 mongo=AsyncIOMotorClient(MONGO_URI)
 db=mongo["srcprotect"]
@@ -32,7 +31,9 @@ bot=Client("protectbot",api_id=API_ID,api_hash=API_HASH,bot_token=BOT_TOKEN)
 
 POST_DELAY=2
 
-upload_queue=Queue()
+buffer_messages=[]
+BUFFER_TIME=5
+last_receive=time.time()
 
 user_last_request={}
 
@@ -118,7 +119,6 @@ async def protectlist(client,message):
     async for c in channels_db.find():
 
         status="ACTIVE" if c["active"] else "STOPPED"
-
         text+=f"{c['id']}. {c['name']} ({status})\n"
 
     await message.reply_text(text)
@@ -130,7 +130,6 @@ async def protectstop(client,message):
         return
 
     cid=int(message.command[1])
-
     await channels_db.update_one({"id":cid},{"$set":{"active":False}})
 
     await message.reply_text("Protection stopped")
@@ -142,7 +141,6 @@ async def protectrestart(client,message):
         return
 
     cid=int(message.command[1])
-
     await channels_db.update_one({"id":cid},{"$set":{"active":True}})
 
     await message.reply_text("Protection restarted")
@@ -167,13 +165,14 @@ async def cleandb(client,message):
         return
 
     cid=int(message.command[1])
-
     await videos_db.delete_many({"course_id":cid})
 
     await message.reply_text("Database cleaned")
 
 @bot.on_message(filters.channel & (filters.video | filters.document))
 async def detect_storage(client,message):
+
+    global last_receive
 
     course=await channels_db.find_one({"storage":message.chat.id})
 
@@ -183,57 +182,60 @@ async def detect_storage(client,message):
     if not course["active"]:
         return
 
-    await upload_queue.put((course,message))
+    buffer_messages.append((course,message))
+    last_receive=time.time()
 
 async def upload_worker():
 
+    global buffer_messages
+
     while True:
 
-        course,message=await upload_queue.get()
+        if buffer_messages and time.time()-last_receive>BUFFER_TIME:
 
-        try:
+            buffer_messages.sort(key=lambda x: x[1].id)
 
-            token=await unique_token()
-
-            await videos_db.insert_one({
-                "course_id":course["id"],
-                "token":token,
-                "message_id":message.id
-            })
-
-            button=InlineKeyboardMarkup(
-                [[InlineKeyboardButton(
-                    "▶ Watch Video",
-                    callback_data=f"watch_{course['id']}_{token}"
-                )]]
-            )
-
-            sent=False
-
-            while not sent:
+            for course,message in buffer_messages:
 
                 try:
 
-                    await bot.send_message(
-                        course["public"],
-                        message.caption or "",
-                        reply_markup=button
+                    token=await unique_token()
+
+                    await videos_db.insert_one({
+                        "course_id":course["id"],
+                        "token":token,
+                        "message_id":message.id
+                    })
+
+                    button=InlineKeyboardMarkup(
+                        [[InlineKeyboardButton(
+                            "▶ Watch Video",
+                            callback_data=f"watch_{course['id']}_{token}"
+                        )]]
                     )
 
-                    sent=True
+                    sent=False
+
+                    while not sent:
+                        try:
+                            await bot.send_message(
+                                course["public"],
+                                message.caption or "",
+                                reply_markup=button
+                            )
+                            sent=True
+                        except Exception as e:
+                            print("Retry send:",e)
+                            await asyncio.sleep(5)
+
+                    await asyncio.sleep(POST_DELAY)
 
                 except Exception as e:
+                    print("Worker error:",e)
 
-                    print("Retry send:",e)
-                    await asyncio.sleep(5)
+            buffer_messages=[]
 
-            await asyncio.sleep(POST_DELAY)
-
-        except Exception as e:
-
-            print("Worker error:",e)
-
-        upload_queue.task_done()
+        await asyncio.sleep(1)
 
 @bot.on_callback_query()
 async def callback_handler(client,query):
@@ -265,7 +267,6 @@ async def start(client,message):
         return
 
     if len(message.command)==1:
-
         await message.reply_text(
         f"This bot is private.\n\nContact {CONTACT_BOT}")
         return
@@ -273,7 +274,6 @@ async def start(client,message):
     payload=message.command[1]
 
     course_id,token=payload.split("_")
-
     course_id=int(course_id)
 
     course=await channels_db.find_one({"id":course_id})

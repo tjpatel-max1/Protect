@@ -209,7 +209,7 @@ async def upload_worker():
 
                     button=InlineKeyboardMarkup(
                         [[InlineKeyboardButton(
-                            "▶ Watch Video",
+                            "▶ Get Video/Pdf",
                             callback_data=f"watch_{course['id']}_{token}"
                         )]]
                     )

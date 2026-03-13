@@ -77,39 +77,41 @@ async def is_admin(uid):
 @bot.on_message(filters.command("start"))
 async def start(c, m):
 
-    uid = m.from_user.id
+uid = m.from_user.id
 
-    if not await is_admin(uid):
+# ---- Admins bypass antispam ----
+if not await is_admin(uid):
 
-        now = time.time()
+    now = time.time()
 
-        if uid in timeouts and now < timeouts[uid]:
-            wait = int(timeouts[uid] - now)
-            await m.reply(f"⚠️ Wait {wait} seconds")
-            return
+    if uid in timeouts and now < timeouts[uid]:
+        wait = int(timeouts[uid] - now)
+        await m.reply(f"⚠️ Wait {wait} seconds")
+        return
 
-        if uid not in user_req:
-            user_req[uid] = []
+    if uid not in user_req:
+        user_req[uid] = []
 
-        user_req[uid] = [t for t in user_req[uid] if now - t < WINDOW]
-        user_req[uid].append(now)
+    user_req[uid] = [t for t in user_req[uid] if now - t < WINDOW]
+    user_req[uid].append(now)
 
-        if len(user_req[uid]) >= SPAM_LIMIT:
+    if len(user_req[uid]) >= SPAM_LIMIT:
 
-            timeout = FIRST_TIMEOUT if uid not in timeouts else SECOND_TIMEOUT
-            timeouts[uid] = now + timeout
+        timeout = FIRST_TIMEOUT if uid not in timeouts else SECOND_TIMEOUT
+        timeouts[uid] = now + timeout
 
-            await m.reply("⚠️ Too many requests")
+        await m.reply("⚠️ Too many requests")
 
-            try:
+        try:
+            if uid != ADMIN_ID:
                 await bot.send_message(
                     ADMIN_ID,
                     f"🚨 Spam detected\nUser: {uid}"
                 )
-            except:
-                pass
+        except:
+            pass
 
-            return
+        return
 
     await users.update_one(
         {"user_id": uid},

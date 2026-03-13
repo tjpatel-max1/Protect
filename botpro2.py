@@ -1,6 +1,4 @@
 import asyncio
-
-# create event loop FIRST (fix for Render + Python 3.14)
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
@@ -9,6 +7,8 @@ import time
 import random
 import string
 import threading
+
+from collections import defaultdict
 
 from flask import Flask
 from pyrogram import Client, filters

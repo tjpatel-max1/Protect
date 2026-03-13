@@ -20,7 +20,7 @@ API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO = os.getenv("MONGO_URI")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-CONTACT = "@VIP_Official_gang_Bot"
+CONTACT = os.getenv("CONTACT", "Admin")
 
 bot = Client(
     "protectbot",

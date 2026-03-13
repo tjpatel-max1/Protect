@@ -77,48 +77,50 @@ async def is_admin(uid):
 @bot.on_message(filters.command("start"))
 async def start(c, m):
 
-uid = m.from_user.id
+    uid = m.from_user.id
 
-# ---- Admins bypass antispam ----
-if not await is_admin(uid):
+    # -------- ADMIN BYPASS ANTISPAM --------
+    if not await is_admin(uid):
 
-    now = time.time()
+        now = time.time()
 
-    if uid in timeouts and now < timeouts[uid]:
-        wait = int(timeouts[uid] - now)
-        await m.reply(f"⚠️ Wait {wait} seconds")
-        return
+        if uid in timeouts and now < timeouts[uid]:
+            wait = int(timeouts[uid] - now)
+            await m.reply(f"⚠️ Wait {wait} seconds")
+            return
 
-    if uid not in user_req:
-        user_req[uid] = []
+        if uid not in user_req:
+            user_req[uid] = []
 
-    user_req[uid] = [t for t in user_req[uid] if now - t < WINDOW]
-    user_req[uid].append(now)
+        user_req[uid] = [t for t in user_req[uid] if now - t < WINDOW]
+        user_req[uid].append(now)
 
-    if len(user_req[uid]) >= SPAM_LIMIT:
+        if len(user_req[uid]) >= SPAM_LIMIT:
 
-        timeout = FIRST_TIMEOUT if uid not in timeouts else SECOND_TIMEOUT
-        timeouts[uid] = now + timeout
+            timeout = FIRST_TIMEOUT if uid not in timeouts else SECOND_TIMEOUT
+            timeouts[uid] = now + timeout
 
-        await m.reply("⚠️ Too many requests")
+            await m.reply("⚠️ Too many requests")
 
-        try:
-            if uid != ADMIN_ID:
-                await bot.send_message(
-                    ADMIN_ID,
-                    f"🚨 Spam detected\nUser: {uid}"
-                )
-        except:
-            pass
+            try:
+                if uid != ADMIN_ID:
+                    await bot.send_message(
+                        ADMIN_ID,
+                        f"🚨 Spam detected\nUser: {uid}"
+                    )
+            except:
+                pass
 
-        return
+            return
 
+    # -------- SAVE USER --------
     await users.update_one(
         {"user_id": uid},
         {"$set": {"name": m.from_user.first_name}},
         upsert=True
     )
 
+    # -------- NORMAL START --------
     if len(m.command) == 1:
         await m.reply(f"This bot is private.\nContact {CONTACT}")
         return
@@ -135,16 +137,22 @@ if not await is_admin(uid):
     if not course:
         return
 
-    member = await bot.get_chat_member(course["public"], uid)
-    if member.status in ["left", "kicked"]:
+    # -------- FORCE SUB CHECK --------
+    try:
+        member = await bot.get_chat_member(course["public"], uid)
+        if member.status not in ["member", "administrator", "creator"]:
+            return
+    except:
         return
 
+    # -------- VIDEO FETCH --------
     vid = await videos.find_one({"course_id": cid, "token": tok})
     if not vid:
         return
 
     await bot.copy_message(uid, course["storage"], vid["msg"])
 
+    # -------- VIEWER ANALYTICS --------
     await viewer.update_one(
         {"course": cid, "user": uid},
         {"$inc": {"count": 1}},
@@ -156,7 +164,6 @@ if not await is_admin(uid):
         "user": uid,
         "time": time.time()
     })
-
 # -------- STORAGE DETECTOR --------
 @bot.on_message(filters.video | filters.document)
 async def detect(c, m):
@@ -381,18 +388,25 @@ async def topviewers(c, m):
 
     text = "👥 Channel-Wise Top Viewer Data:\n\n"
 
-    cursor = viewer.find({"course": cid}).sort("count",-1).limit(20)
+    cursor = viewer.find({"course": cid}).sort("count", -1).limit(20)
 
     i = 1
     async for v in cursor:
-        text += f"{i}. {v['user']} - {v['count']} Videos\n"
+
+        uid = v["user"]
+        count = v["count"]
+
+        u = await users.find_one({"user_id": uid})
+        name = u["name"] if u else "Unknown"
+
+        text += f"{i}. {name} ({uid}) - {count} Videos\n"
+
         i += 1
 
     if i == 1:
         text += "No data yet."
 
     await m.reply(text)
-
 # -------- USER STATS --------
 @bot.on_message(filters.command("userstats"))
 async def userstats(c, m):

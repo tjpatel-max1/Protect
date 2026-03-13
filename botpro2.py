@@ -7,443 +7,393 @@ import time
 import random
 import string
 import threading
-
-from collections import defaultdict
-
 from flask import Flask
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from motor.motor_asyncio import AsyncIOMotorClient
 
+API_ID=int(os.getenv("API_ID"))
+API_HASH=os.getenv("API_HASH")
+BOT_TOKEN=os.getenv("BOT_TOKEN")
+ADMIN_ID=int(os.getenv("ADMIN_ID"))
+MONGO_URI=os.getenv("MONGO_URI")
+PORT=int(os.getenv("PORT",10000))
+CONTACT=os.getenv("CONTACT_BOT","")
 
-# -------- ENV VARIABLES --------
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-MONGO_URI = os.getenv("MONGO_URI")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
-CONTACT = os.getenv("CONTACT", "Admin")
-PORT = int(os.getenv("PORT", 10000))
+mongo=AsyncIOMotorClient(MONGO_URI)
+db=mongo["srcprotect"]
 
-# -------- BOT --------
-bot = Client(
-    "protectbot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN
-)
+channels=db.channels
+videos=db.videos
+admins=db.admins
+users=db.users
+viewer_stats=db.viewer_stats
+watch_logs=db.watch_logs
+sent_videos=db.sent_videos
 
-# -------- DATABASE --------
-mongo = AsyncIOMotorClient(MONGO_URI)
-db = mongo["protectbot"]
+bot=Client("bot",api_id=API_ID,api_hash=API_HASH,bot_token=BOT_TOKEN)
 
-channels = db.channels
-videos = db.videos
-users = db.users
-admins = db.admins
-viewer = db.viewer_stats
-watch = db.watch_logs
+POST_DELAY=2
+BUFFER_TIME=5
 
-# -------- BUFFER SYSTEM (same as gama) --------
-BUFFER_TIME = 5
-buffer = defaultdict(list)
+buffer=[]
+last_receive=time.time()
 
-# -------- QUEUE --------
-queue = asyncio.Queue()
+BOT_USERNAME=None
 
-# -------- ANTISPAM --------
-user_req = {}
-timeouts = {}
-
-SPAM_LIMIT = 3
-WINDOW = 30
-FIRST_TIMEOUT = 60
-SECOND_TIMEOUT = 600
-
-# -------- TOKEN --------
 def gen_token():
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+    return ''.join(random.choice(string.ascii_letters+string.digits) for _ in range(10))
 
-# -------- ADMIN CHECK --------
+async def unique_token():
+    while True:
+        t=gen_token()
+        if not await videos.find_one({"token":t}):
+            return t
+
 async def is_admin(uid):
-
-    if uid == ADMIN_ID:
+    if uid==ADMIN_ID:
         return True
+    if await admins.find_one({"user_id":uid}):
+        return True
+    return False
 
-    a = await admins.find_one({"user_id": uid})
-    return bool(a)
-
-# -------- USER START --------
+# START
 @bot.on_message(filters.command("start"))
-async def start(c, m):
+async def start(client,message):
 
-    uid = m.from_user.id
-
-    # -------- ADMIN BYPASS ANTISPAM --------
-    if not await is_admin(uid):
-
-        now = time.time()
-
-        if uid in timeouts and now < timeouts[uid]:
-            wait = int(timeouts[uid] - now)
-            await m.reply(f"⚠️ Wait {wait} seconds")
-            return
-
-        if uid not in user_req:
-            user_req[uid] = []
-
-        user_req[uid] = [t for t in user_req[uid] if now - t < WINDOW]
-        user_req[uid].append(now)
-
-        if len(user_req[uid]) >= SPAM_LIMIT:
-
-            timeout = FIRST_TIMEOUT if uid not in timeouts else SECOND_TIMEOUT
-            timeouts[uid] = now + timeout
-
-            await m.reply("⚠️ Too many requests")
-
-            try:
-                if uid != ADMIN_ID:
-                    await bot.send_message(
-                        ADMIN_ID,
-                        f"🚨 Spam detected\nUser: {uid}"
-                    )
-            except:
-                pass
-
-            return
-
-    # -------- SAVE USER --------
     await users.update_one(
-        {"user_id": uid},
-        {"$set": {"name": m.from_user.first_name}},
+        {"user_id":message.from_user.id},
+        {"$set":{"name":message.from_user.first_name}},
         upsert=True
     )
 
-    # -------- NORMAL START --------
-    if len(m.command) == 1:
-        await m.reply(f"This bot is private.\nContact {CONTACT}")
+    if len(message.command)==1:
+        await message.reply_text(f"This bot is private.\nContact {CONTACT}")
         return
 
-    payload = m.command[1]
+    payload=message.command[1]
 
     try:
-        cid, tok = payload.split("_")
-        cid = int(cid)
+        course_id,token=payload.split("_")
     except:
         return
 
-    course = await channels.find_one({"id": cid, "active": True})
+    course_id=int(course_id)
+
+    course=await channels.find_one({"id":course_id})
+
     if not course:
         return
 
-    # -------- FORCE SUB CHECK --------
+    user=message.from_user.id
+
     try:
-        member = await bot.get_chat_member(course["public"], uid)
-        if member.status not in ["member", "administrator", "creator"]:
-            return
+        member=await client.get_chat_member(course["public"],user)
     except:
         return
 
-    # -------- VIDEO FETCH --------
-    vid = await videos.find_one({"course_id": cid, "token": tok})
-    if not vid:
+    if member.status in ["left","kicked"]:
         return
 
-    await bot.copy_message(uid, course["storage"], vid["msg"])
+    video=await videos.find_one({"course_id":course_id,"token":token})
 
-    # -------- VIEWER ANALYTICS --------
-    await viewer.update_one(
-        {"course": cid, "user": uid},
-        {"$inc": {"count": 1}},
+    if not video:
+        return
+
+    msg=await client.copy_message(
+        chat_id=user,
+        from_chat_id=course["storage"],
+        message_id=video["message_id"],
+        protect_content=True
+    )
+
+    await sent_videos.insert_one({
+        "user_id":user,
+        "course_id":course_id,
+        "message_id":msg.id
+    })
+
+    await viewer_stats.update_one(
+        {"course_id":course_id,"user_id":user},
+        {"$inc":{"watch_count":1},
+         "$set":{"name":message.from_user.first_name}},
         upsert=True
     )
 
-    await watch.insert_one({
-        "course": cid,
-        "user": uid,
-        "time": time.time()
+    await watch_logs.insert_one({
+        "user_id":user,
+        "course_id":course_id,
+        "video_id":video["message_id"],
+        "time":time.time()
     })
-# -------- STORAGE DETECTOR --------
-@bot.on_message(filters.video | filters.document)
-async def detect(c, m):
 
-    course = await channels.find_one({"storage": m.chat.id})
+# WATCH BUTTON
+@bot.on_callback_query()
+async def cb(client,query):
 
-    if not course or not course["active"]:
+    if not query.data.startswith("watch_"):
         return
 
-    cid = course["id"]
-    tok = gen_token()
+    _,course_id,token=query.data.split("_")
 
-    await videos.insert_one({
-        "course_id": cid,
-        "msg": m.id,
-        "token": tok
-    })
-
-    btn = InlineKeyboardMarkup(
-        [[InlineKeyboardButton(
-            "Watch Video",
-            url=f"https://t.me/{(await bot.get_me()).username}?start={cid}_{tok}"
-        )]]
+    await query.answer(
+        url=f"https://t.me/{BOT_USERNAME}?start={course_id}_{token}"
     )
 
-    buffer[cid].append((course, m, btn))
+# STORAGE DETECTION
+@bot.on_message(filters.channel & (filters.video | filters.document))
+async def storage(client,message):
 
-    await asyncio.sleep(BUFFER_TIME)
+    global last_receive
 
-    items = buffer[cid]
-    buffer[cid] = []
+    course=await channels.find_one({"storage":message.chat.id})
 
-    items.sort(key=lambda x: x[1].id)
+    if not course or not course.get("active",True):
+        return
 
-    for course, msg, btn in items:
-        await queue.put((course, msg, btn))
+    buffer.append((course,message))
+    last_receive=time.time()
 
-# -------- QUEUE WORKER --------
+# WORKER
 async def worker():
+
+    global buffer
 
     while True:
 
-        course, msg, btn = await queue.get()
+        if buffer and time.time()-last_receive>BUFFER_TIME:
 
-        try:
+            buffer.sort(key=lambda x:x[1].id)
 
-            await bot.send_message(
-                course["public"],
-                msg.caption,
-                reply_markup=btn
-            )
+            for course,msg in buffer:
 
-            await asyncio.sleep(2)
+                try:
 
-        except Exception as e:
-            print("Worker error:", e)
+                    t=await unique_token()
 
-loop.create_task(worker())
+                    await videos.insert_one({
+                        "course_id":course["id"],
+                        "token":t,
+                        "message_id":msg.id
+                    })
 
-# -------- PROTECTION --------
-@bot.on_message(filters.command("addprotect"))
-async def addprotect(c, m):
+                    btn=InlineKeyboardMarkup(
+                        [[InlineKeyboardButton(
+                            "▶ Watch Video",
+                            callback_data=f"watch_{course['id']}_{t}"
+                        )]]
+                    )
 
-    if not await is_admin(m.from_user.id):
-        return
+                    await bot.send_message(
+                        course["public"],
+                        (msg.caption or "")[:1024],
+                        reply_markup=btn
+                    )
 
-    storage = int(m.command[1])
-    post = int(m.command[2])
-    name = m.command[3]
+                    await asyncio.sleep(POST_DELAY)
 
-    if await channels.find_one({"storage": storage}):
-        await m.reply("Storage already protected")
-        return
+                except Exception as e:
+                    print("Worker error",e)
 
-    cid = await channels.count_documents({}) + 1
+            buffer=[]
 
-    await channels.insert_one({
-        "id": cid,
-        "name": name,
-        "storage": storage,
-        "public": post,
-        "active": True
-    })
+        await asyncio.sleep(1)
 
-    await m.reply(f"Protection added\nID {cid}")
-
-# -------- PROTECT LIST --------
-@bot.on_message(filters.command("protectlist"))
-async def protectlist(c, m):
-
-    if not await is_admin(m.from_user.id):
-        return
-
-    text = "📚 Protected Courses\n\n"
-
-    async for x in channels.find():
-
-        status = "ACTIVE" if x["active"] else "STOPPED"
-
-        text += (
-            f"{x['name']}\n"
-            f"ID: {x['id']}\n"
-            f"Status: {status}\n\n"
-        )
-
-    await m.reply(text)
-
-# -------- STOP --------
-@bot.on_message(filters.command("protectstop"))
-async def protectstop(c, m):
-
-    if not await is_admin(m.from_user.id):
-        return
-
-    cid = int(m.command[1])
-
-    await channels.update_one(
-        {"id": cid},
-        {"$set": {"active": False}}
-    )
-
-    await m.reply("Protection stopped")
-
-# -------- RESTART --------
-@bot.on_message(filters.command("protectrestart"))
-async def protectrestart(c, m):
-
-    if not await is_admin(m.from_user.id):
-        return
-
-    cid = int(m.command[1])
-
-    await channels.update_one(
-        {"id": cid},
-        {"$set": {"active": True}}
-    )
-
-    await m.reply("Protection restarted")
-
-# -------- REMOVE --------
-@bot.on_message(filters.command("protectremove"))
-async def protectremove(c, m):
-
-    if not await is_admin(m.from_user.id):
-        return
-
-    cid = int(m.command[1])
-
-    course = await channels.find_one({"id": cid})
-
-    if not course:
-        await m.reply("Course not found")
-        return
-
-    await channels.delete_one({"_id": course["_id"]})
-    await videos.delete_many({"course_id": cid})
-
-    await m.reply("Protection removed")
-
-# -------- ADMIN MANAGEMENT --------
-@bot.on_message(filters.command("addadmin"))
-async def addadmin(c, m):
-
-    if m.from_user.id != ADMIN_ID:
-        return
-
-    uid = int(m.command[1])
-
-    await admins.update_one(
-        {"user_id": uid},
-        {"$set": {"user_id": uid}},
-        upsert=True
-    )
-
-    await m.reply(f"Admin added: {uid}")
-
-@bot.on_message(filters.command("removeadmin"))
-async def removeadmin(c, m):
-
-    if m.from_user.id != ADMIN_ID:
-        return
-
-    uid = int(m.command[1])
-
-    await admins.delete_one({"user_id": uid})
-
-    await m.reply(f"Admin removed: {uid}")
-
-# -------- BROADCAST --------
+# BROADCAST
 @bot.on_message(filters.command("broadcast"))
-async def broadcast(c, m):
+async def broadcast(client,message):
 
-    if not await is_admin(m.from_user.id):
+    if not await is_admin(message.from_user.id):
         return
 
-    text = m.text.split(None,1)[1]
+    if len(message.command)<2:
+        await message.reply_text("Usage:\n/broadcast message")
+        return
 
-    sent = 0
-    blocked = 0
+    text=message.text.split(None,1)[1]
+
+    sent=0
+    removed=0
 
     async for u in users.find():
 
         try:
-            await bot.send_message(u["user_id"], text)
-            sent += 1
-            await asyncio.sleep(0.05)
-        except:
-            blocked += 1
 
-    await m.reply(
-        f"Broadcast complete\nSent: {sent}\nBlocked: {blocked}"
+            await client.send_message(u["user_id"],text)
+            sent+=1
+            await asyncio.sleep(0.1)
+
+        except:
+            await users.delete_one({"user_id":u["user_id"]})
+            removed+=1
+
+    await message.reply_text(
+        f"Broadcast complete\nSent: {sent}\nRemoved blocked: {removed}"
     )
 
-# -------- ANALYTICS --------
+# TOP VIEWERS
 @bot.on_message(filters.command("topviewers"))
-async def topviewers(c, m):
+async def topviewers(client,message):
 
-    if not await is_admin(m.from_user.id):
+    if not await is_admin(message.from_user.id):
         return
 
-    cid = int(m.command[1])
+    if len(message.command)<2:
+        await message.reply_text("Usage:\n/topviewers course_id")
+        return
 
-    text = "👥 Channel-Wise Top Viewer Data:\n\n"
+    cid=int(message.command[1])
 
-    cursor = viewer.find({"course": cid}).sort("count", -1).limit(20)
+    text="👥 Channel-Wise Top Viewer Data:\n\n"
 
-    i = 1
-    async for v in cursor:
+    i=1
 
-        uid = v["user"]
-        count = v["count"]
+    async for u in viewer_stats.find({"course_id":cid}).sort("watch_count",-1).limit(100):
 
-        u = await users.find_one({"user_id": uid})
-        name = u["name"] if u else "Unknown"
+        name=u.get("name","User")
+        uid=u.get("user_id","")
 
-        text += f"{i}. {name} ({uid}) - {count} Videos\n"
+        text+=f"{i}. {name} ({uid}) - {u['watch_count']} Videos\n"
+        i+=1
 
-        i += 1
+    if i==1:
+        text+="No data yet."
 
-    if i == 1:
-        text += "No data yet."
+    await message.reply_text(text)
 
-    await m.reply(text)
-# -------- USER STATS --------
+# USER STATS
 @bot.on_message(filters.command("userstats"))
-async def userstats(c, m):
+async def userstats(client,message):
 
-    if not await is_admin(m.from_user.id):
+    if not await is_admin(message.from_user.id):
         return
 
-    uid = int(m.command[1])
+    if len(message.command)<2:
+        return
 
-    total = await viewer.count_documents({"user": uid})
+    uid=int(message.command[1])
 
-    today = await watch.count_documents({
-        "user": uid,
-        "time": {"$gte": time.time() - 86400}
+    total=await watch_logs.count_documents({"user_id":uid})
+
+    today=time.time()-86400
+
+    today_count=await watch_logs.count_documents({
+        "user_id":uid,
+        "time":{"$gt":today}
     })
 
-    await m.reply(
-        f"User {uid}\n\nTotal Videos: {total}\nToday: {today}"
+    await message.reply_text(
+        f"User {uid}\n\nTotal Videos: {total}\nToday: {today_count}"
     )
 
-# -------- ID HELPER --------
-@bot.on_message(filters.command("id"))
-async def getid(c, m):
-    await m.reply(f"Chat ID:\n`{m.chat.id}`")
+# PROTECT LIST
+@bot.on_message(filters.command("protectlist"))
+async def protectlist(client,message):
 
-# -------- FLASK KEEPALIVE --------
-app = Flask(__name__)
+    if not await is_admin(message.from_user.id):
+        return
+
+    text="📚 Protected Courses\n\n"
+    i=1
+
+    async for c in channels.find():
+
+        name=c.get("name","Unnamed")
+        status="ACTIVE" if c.get("active",True) else "STOPPED"
+
+        text+=f"{i}. {name} ({status})\n"
+        i+=1
+
+    if i==1:
+        text+="No courses added yet."
+
+    await message.reply_text(text)
+
+# ADMIN MANAGEMENT
+@bot.on_message(filters.command("addadmin"))
+async def addadmin(client,message):
+
+    if not await is_admin(message.from_user.id):
+        return
+
+    if len(message.command)<2:
+        await message.reply_text("Usage:\n/addadmin user_id")
+        return
+
+    uid=int(message.command[1])
+
+    if await admins.find_one({"user_id":uid}):
+        await message.reply_text("Admin already exists.")
+        return
+
+    await admins.insert_one({"user_id":uid})
+
+    await message.reply_text(f"Admin added:\n{uid}")
+
+@bot.on_message(filters.command("removeadmin"))
+async def removeadmin(client,message):
+
+    if not await is_admin(message.from_user.id):
+        return
+
+    if len(message.command)<2:
+        await message.reply_text("Usage:\n/removeadmin user_id")
+        return
+
+    uid=int(message.command[1])
+
+    await admins.delete_one({"user_id":uid})
+
+    await message.reply_text(f"Admin removed:\n{uid}")
+
+# ID COMMAND
+@bot.on_message(filters.command("id"))
+async def get_id(client,message):
+
+    if message.chat.type=="private":
+        await message.reply_text(f"Your ID:\n{message.from_user.id}")
+    else:
+        await message.reply_text(f"Chat ID:\n{message.chat.id}")
+
+# RECONNECT
+@bot.on_message(filters.command("reconnect"))
+async def reconnect(client,message):
+
+    if not await is_admin(message.from_user.id):
+        return
+
+    text="Reconnecting courses...\n\n"
+
+    async for c in channels.find():
+
+        try:
+            await client.get_chat(c["storage"])
+            await client.get_chat(c["public"])
+            text+=f"✅ {c['name']}\n"
+        except:
+            text+=f"❌ {c['name']}\n"
+
+    await message.reply_text(text)
+
+# INIT BOT
+async def init_bot():
+    global BOT_USERNAME
+    me=await bot.get_me()
+    BOT_USERNAME=me.username
+
+# FLASK
+app=Flask(__name__)
 
 @app.route("/")
 def home():
     return "Bot Running"
 
 def run():
-    app.run("0.0.0.0", PORT)
+    app.run("0.0.0.0",PORT)
 
 threading.Thread(target=run).start()
 
-print("BOT RUNNING")
+loop.run_until_complete(init_bot())
+loop.create_task(worker())
 
 bot.run()

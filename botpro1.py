@@ -363,4 +363,10 @@ async def detect_storage(client, message):
 
 print("BOT RUNNING")
 
-bot.run()
+async def main():
+    await bot.start()
+    print("BOT RUNNING")
+    await asyncio.Event().wait()
+
+if __name__ == "__main__":
+    asyncio.run(main())

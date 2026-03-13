@@ -1,19 +1,20 @@
 import asyncio
+
+# create event loop FIRST (fix for Render + Python 3.14)
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
 import os
 import time
 import random
 import string
 import threading
-from collections import defaultdict
 
 from flask import Flask
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# -------- EVENT LOOP FIX FOR RENDER --------
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
 
 # -------- ENV VARIABLES --------
 API_ID = int(os.getenv("API_ID"))
@@ -21,7 +22,7 @@ API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-CONTACT = os.getenv("CONTACT", "@VIP_Official_gang_Bot")
+CONTACT = os.getenv("CONTACT", "Admin")
 PORT = int(os.getenv("PORT", 10000))
 
 # -------- BOT --------

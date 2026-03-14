@@ -33,7 +33,7 @@ sent_videos=db.sent_videos
 
 bot=Client("bot",api_id=API_ID,api_hash=API_HASH,bot_token=BOT_TOKEN)
 
-POST_DELAY=2
+POST_DELAY=3
 BUFFER_TIME=5
 
 buffer=[]
@@ -163,50 +163,7 @@ async def storage(client,message):
     last_receive=time.time()
 
 
-# WORKER
-async def worker():
 
-    global buffer
-
-    while True:
-
-        if buffer and time.time()-last_receive>BUFFER_TIME:
-
-            buffer.sort(key=lambda x:x[1].id)
-
-            for course,msg in buffer:
-
-                try:
-
-                    t=await unique_token()
-
-                    await videos.insert_one({
-                        "course_id":course["id"],
-                        "token":t,
-                        "message_id":msg.id
-                    })
-
-                    btn=InlineKeyboardMarkup(
-                        [[InlineKeyboardButton(
-                            "▶ Watch Video",
-                            callback_data=f"watch_{course['id']}_{t}"
-                        )]]
-                    )
-
-                    await bot.send_message(
-                        course["public"],
-                        msg.caption or "",
-                        reply_markup=btn
-                    )
-
-                    await asyncio.sleep(POST_DELAY)
-
-                except Exception as e:
-                    print("Worker error",e)
-
-            buffer=[]
-
-        await asyncio.sleep(1)
 
 
 # BROADCAST
@@ -240,6 +197,75 @@ async def broadcast(client,message):
     await message.reply_text(
         f"Broadcast complete\nSent: {sent}\nRemoved blocked: {removed}"
     )
+    
+# WORKER
+async def worker():
+
+    global buffer
+
+    while True:
+
+        if buffer and time.time()-last_receive>BUFFER_TIME:
+
+            buffer.sort(key=lambda x:x[1].id)
+
+            for course,msg in buffer:
+
+                sent=False
+
+                while not sent:
+
+                    try:
+
+                        t=await unique_token()
+
+                        await videos.insert_one({
+                            "course_id":course["id"],
+                            "token":t,
+                            "message_id":msg.id
+                        })
+
+                        btn=InlineKeyboardMarkup(
+                            [[InlineKeyboardButton(
+                                "▶ Watch Video",
+                                callback_data=f"watch_{course['id']}_{t}"
+                            )]]
+                        )
+
+                        await bot.send_message(
+                            course["public"],
+                            msg.caption or "",
+                            reply_markup=btn
+                        )
+
+                        sent=True
+
+                        await asyncio.sleep(POST_DELAY)
+
+                    except Exception as e:
+
+                        txt=str(e)
+
+                        if "FloodWait" in txt:
+
+                            try:
+                                wait=int(txt.split()[-2])
+                            except:
+                                wait=10
+
+                            print("FloodWait detected. Waiting:",wait)
+
+                            await asyncio.sleep(wait)
+
+                        else:
+
+                            print("Worker error:",e)
+
+                            await asyncio.sleep(5)
+
+            buffer=[]
+
+        await asyncio.sleep(1)
 
 
 # TOP VIEWERS

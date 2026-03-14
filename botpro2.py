@@ -207,30 +207,52 @@ async def worker():
 
         if buffer and time.time()-last_receive>BUFFER_TIME:
 
-            buffer.sort(key=lambda x:x[1].id)
+            current_batch = buffer
+            buffer = []
 
-            for course,msg in buffer:
+            current_batch.sort(key=lambda x:x[1].id)
 
-                sent=False
+            for course,msg in current_batch:
 
-                while not sent:
+                try:
 
-                    try:
+                    t=await unique_token()
 
-                        t=await unique_token()
+                    await videos.insert_one({
+                        "course_id":course["id"],
+                        "token":t,
+                        "message_id":msg.id
+                    })
 
-                        await videos.insert_one({
-                            "course_id":course["id"],
-                            "token":t,
-                            "message_id":msg.id
-                        })
+                    btn=InlineKeyboardMarkup(
+                        [[InlineKeyboardButton(
+                            "▶ Watch Video/ Get PDF",
+                            callback_data=f"watch_{course['id']}_{t}"
+                        )]]
+                    )
 
-                        btn=InlineKeyboardMarkup(
-                            [[InlineKeyboardButton(
-                                "▶ Watch Video",
-                                callback_data=f"watch_{course['id']}_{t}"
-                            )]]
-                        )
+                    await bot.send_message(
+                        course["public"],
+                        msg.caption or "",
+                        reply_markup=btn
+                    )
+
+                    await asyncio.sleep(POST_DELAY)
+
+                except Exception as e:
+
+                    txt=str(e)
+
+                    if "FloodWait" in txt:
+
+                        try:
+                            wait=int(txt.split()[-2])
+                        except:
+                            wait=10
+
+                        print("FloodWait:",wait)
+
+                        await asyncio.sleep(wait)
 
                         await bot.send_message(
                             course["public"],
@@ -238,34 +260,16 @@ async def worker():
                             reply_markup=btn
                         )
 
-                        sent=True
-
                         await asyncio.sleep(POST_DELAY)
 
-                    except Exception as e:
+                    else:
 
-                        txt=str(e)
+                        print("Worker error:",e)
 
-                        if "FloodWait" in txt:
-
-                            try:
-                                wait=int(txt.split()[-2])
-                            except:
-                                wait=10
-
-                            print("FloodWait detected. Waiting:",wait)
-
-                            await asyncio.sleep(wait)
-
-                        else:
-
-                            print("Worker error:",e)
-
-                            await asyncio.sleep(5)
-
-            buffer=[]
+                        await asyncio.sleep(5)
 
         await asyncio.sleep(1)
+
 
 
 # TOP VIEWERS

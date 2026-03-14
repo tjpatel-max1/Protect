@@ -41,17 +41,14 @@ last_receive=time.time()
 
 BOT_USERNAME=None
 
-
 def gen_token():
     return ''.join(random.choice(string.ascii_letters+string.digits) for _ in range(10))
-
 
 async def unique_token():
     while True:
         t=gen_token()
         if not await videos.find_one({"token":t}):
             return t
-
 
 async def is_admin(uid):
     if uid==ADMIN_ID:
@@ -65,8 +62,10 @@ async def is_admin(uid):
 @bot.on_message(filters.command("start"))
 async def start(client,message):
 
+    user_id=message.from_user.id
+
     await users.update_one(
-        {"user_id":message.from_user.id},
+        {"user_id":user_id},
         {"$set":{"name":message.from_user.first_name}},
         upsert=True
     )
@@ -89,12 +88,9 @@ async def start(client,message):
     if not course:
         return
 
-    user=message.from_user.id
+    user=user_id
 
-    try:
-        member=await client.get_chat_member(course["public"],user)
-    except:
-        return
+    member=await client.get_chat_member(course["public"],user)
 
     if member.status in ["left","kicked"]:
         return
@@ -136,10 +132,16 @@ async def start(client,message):
 @bot.on_callback_query()
 async def cb(client,query):
 
+    global BOT_USERNAME
+
     if not query.data.startswith("watch_"):
         return
 
     _,course_id,token=query.data.split("_")
+
+    if not BOT_USERNAME:
+        me=await client.get_me()
+        BOT_USERNAME=me.username
 
     await query.answer(
         url=f"https://t.me/{BOT_USERNAME}?start={course_id}_{token}"
@@ -193,7 +195,7 @@ async def worker():
 
                     await bot.send_message(
                         course["public"],
-                        (msg.caption or "")[:1024],
+                        msg.caption or "",
                         reply_markup=btn
                     )
 
@@ -271,15 +273,106 @@ async def topviewers(client,message):
     await message.reply_text(text)
 
 
-# INIT BOT
-async def init_bot():
-    global BOT_USERNAME
-    me=await bot.get_me()
-    BOT_USERNAME=me.username
-    print("Bot username:",BOT_USERNAME)
+# USER STATS
+@bot.on_message(filters.command("userstats"))
+async def userstats(client,message):
+
+    if not await is_admin(message.from_user.id):
+        return
+
+    if len(message.command)<2:
+        return
+
+    uid=int(message.command[1])
+
+    total=await watch_logs.count_documents({"user_id":uid})
+
+    today=time.time()-86400
+
+    today_count=await watch_logs.count_documents({
+        "user_id":uid,
+        "time":{"$gt":today}
+    })
+
+    await message.reply_text(
+        f"User {uid}\n\nTotal Videos: {total}\nToday: {today_count}"
+    )
 
 
-# FLASK
+# PROTECT LIST
+@bot.on_message(filters.command("protectlist"))
+async def protectlist(client,message):
+
+    if not await is_admin(message.from_user.id):
+        return
+
+    text="📚 Protected Courses\n\n"
+    i=1
+
+    async for c in channels.find():
+
+        name=c.get("name","Unnamed")
+        status="ACTIVE" if c.get("active",True) else "STOPPED"
+
+        text+=f"{i}. {name} ({status})\n"
+        i+=1
+
+    if i==1:
+        text+="No courses added yet."
+
+    await message.reply_text(text)
+
+
+# ADMIN MANAGEMENT
+@bot.on_message(filters.command("addadmin"))
+async def addadmin(client,message):
+
+    if not await is_admin(message.from_user.id):
+        return
+
+    if len(message.command)<2:
+        await message.reply_text("Usage:\n/addadmin user_id")
+        return
+
+    uid=int(message.command[1])
+
+    if await admins.find_one({"user_id":uid}):
+        await message.reply_text("Admin already exists.")
+        return
+
+    await admins.insert_one({"user_id":uid})
+
+    await message.reply_text(f"Admin added:\n{uid}")
+
+
+@bot.on_message(filters.command("removeadmin"))
+async def removeadmin(client,message):
+
+    if not await is_admin(message.from_user.id):
+        return
+
+    if len(message.command)<2:
+        await message.reply_text("Usage:\n/removeadmin user_id")
+        return
+
+    uid=int(message.command[1])
+
+    await admins.delete_one({"user_id":uid})
+
+    await message.reply_text(f"Admin removed:\n{uid}")
+
+
+# ID COMMAND
+@bot.on_message(filters.command("id"))
+async def get_id(client,message):
+
+    if message.chat.type=="private":
+        await message.reply_text(f"Your ID:\n{message.from_user.id}")
+    else:
+        await message.reply_text(f"Chat ID:\n{message.chat.id}")
+
+
+# FLASK KEEPALIVE
 app=Flask(__name__)
 
 @app.route("/")
@@ -291,13 +384,6 @@ def run():
 
 threading.Thread(target=run).start()
 
-
-@bot.on_event("startup")
-async def startup(client):
-    await init_bot()
-    asyncio.create_task(worker())
-
-
-print("BOT STARTING")
+loop.create_task(worker())
 
 bot.run()

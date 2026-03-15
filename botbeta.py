@@ -219,10 +219,9 @@ async def upload_worker():
 
         try:
 
-            # Worker heartbeat (helps debugging on Render)
             print("Worker alive. Buffer size:", len(buffer_messages))
 
-            if buffer_messages and (time.time()-last_receive > BUFFER_TIME or len(buffer_messages) >= 5):
+            if buffer_messages and time.time()-last_receive > BUFFER_TIME:
 
                 buffer_messages.sort(key=lambda x: x[1].id)
 

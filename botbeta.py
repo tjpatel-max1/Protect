@@ -192,49 +192,61 @@ async def upload_worker():
 
     while True:
 
-        if buffer_messages and time.time()-last_receive>BUFFER_TIME:
+        try:
 
-            buffer_messages.sort(key=lambda x: x[1].id)
+            # Debug heartbeat
+            print("Worker alive. Buffer size:", len(buffer_messages))
 
-            for course,message in buffer_messages:
+            if buffer_messages and (time.time()-last_receive > BUFFER_TIME or len(buffer_messages) >= 5):
 
-                try:
+                buffer_messages.sort(key=lambda x: x[1].id)
 
-                    token=await unique_token()
+                for course, message in buffer_messages:
 
-                    await videos_db.insert_one({
-                        "course_id":course["id"],
-                        "token":token,
-                        "message_id":message.id
-                    })
+                    try:
 
-                    button=InlineKeyboardMarkup(
-                        [[InlineKeyboardButton(
-                            "▶ Get Video/Pdf",
-                            callback_data=f"watch_{course['id']}_{token}"
-                        )]]
-                    )
+                        token = await unique_token()
 
-                    sent=False
+                        await videos_db.insert_one({
+                            "course_id": course["id"],
+                            "token": token,
+                            "message_id": message.id
+                        })
 
-                    while not sent:
-                        try:
-                            await bot.send_message(
-                                course["public"],
-                                message.caption or "",
-                                reply_markup=button
-                            )
-                            sent=True
-                        except Exception as e:
-                            print("Retry send:",e)
-                            await asyncio.sleep(5)
+                        button = InlineKeyboardMarkup(
+                            [[InlineKeyboardButton(
+                                "▶ Get Video/Pdf",
+                                callback_data=f"watch_{course['id']}_{token}"
+                            )]]
+                        )
 
-                    await asyncio.sleep(POST_DELAY)
+                        sent = False
 
-                except Exception as e:
-                    print("Worker error:",e)
+                        while not sent:
+                            try:
+                                print("Sending post to public:", course["public"])
 
-            buffer_messages=[]
+                                await bot.send_message(
+                                    course["public"],
+                                    message.caption or "New Content Available",
+                                    reply_markup=button
+                                )
+
+                                sent = True
+
+                            except Exception as e:
+                                print("Retry send:", e)
+                                await asyncio.sleep(5)
+
+                        await asyncio.sleep(POST_DELAY)
+
+                    except Exception as e:
+                        print("Worker item error:", e)
+
+                buffer_messages = []
+
+        except Exception as e:
+            print("Worker crashed:", e)
 
         await asyncio.sleep(1)
 

@@ -93,9 +93,34 @@ async def addprotect(client,message):
     if not await is_admin(message.from_user.id):
         return
 
-    storage=int(message.command[1])
-    public=int(message.command[2])
-    name=message.command[3]
+    try:
+        storage=int(message.command[1])
+        public=int(message.command[2])
+        name=message.command[3]
+    except:
+        await message.reply_text(
+        "Usage:\n/addprotect STORAGE_ID PUBLIC_ID NAME")
+        return
+
+    # Validate Telegram channel IDs
+    if not str(storage).startswith("-100"):
+        await message.reply_text(
+        "❌ Invalid STORAGE channel ID.\nChannel IDs must start with -100")
+        return
+
+    if not str(public).startswith("-100"):
+        await message.reply_text(
+        "❌ Invalid PUBLIC channel ID.\nChannel IDs must start with -100")
+        return
+
+    # Verify bot access to channels
+    try:
+        await bot.get_chat(storage)
+        await bot.get_chat(public)
+    except Exception as e:
+        await message.reply_text(
+        f"❌ Bot cannot access one of the channels.\nError: {e}")
+        return
 
     count=await channels_db.count_documents({})
 
@@ -107,7 +132,7 @@ async def addprotect(client,message):
         "active":True
     })
 
-    await message.reply_text("Protection added")
+    await message.reply_text("✅ Protection added successfully")
 
 @bot.on_message(filters.command("protectlist"))
 async def protectlist(client,message):
@@ -194,7 +219,7 @@ async def upload_worker():
 
         try:
 
-            # Debug heartbeat
+            # Worker heartbeat (helps debugging on Render)
             print("Worker alive. Buffer size:", len(buffer_messages))
 
             if buffer_messages and (time.time()-last_receive > BUFFER_TIME or len(buffer_messages) >= 5):
@@ -221,9 +246,12 @@ async def upload_worker():
                         )
 
                         sent = False
+                        retry = 0
 
-                        while not sent:
+                        while not sent and retry < 5:
+
                             try:
+
                                 print("Sending post to public:", course["public"])
 
                                 await bot.send_message(
@@ -235,8 +263,14 @@ async def upload_worker():
                                 sent = True
 
                             except Exception as e:
+
+                                retry += 1
                                 print("Retry send:", e)
+
                                 await asyncio.sleep(5)
+
+                        if not sent:
+                            print("Skipping message due to send failure:", course["public"])
 
                         await asyncio.sleep(POST_DELAY)
 

@@ -31,6 +31,10 @@ viewer_stats=db.viewer_stats
 watch_logs=db.watch_logs
 sent_videos=db.sent_videos
 
+channels_db = channels
+videos_db = videos
+admins_db = admins
+
 bot=Client("bot",api_id=API_ID,api_hash=API_HASH,bot_token=BOT_TOKEN)
 
 POST_DELAY=2
